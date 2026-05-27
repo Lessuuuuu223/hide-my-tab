@@ -6,7 +6,7 @@
     <dict>
         <key>Bundles</key>
         <array>
-            <string>com.apple.Safari</string>
+            <string>com.mika.LocationSimulation</string>
         </array>
     </dict>
 </dict>
