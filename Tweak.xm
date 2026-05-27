@@ -1,8 +1,14 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-// ========== 你可以在这里修改固定激活码 ==========
-static NSString * const FIXED_ACTIVATE_CODE = @"123456"; // 改成你想要的验证码就行
+// ========== 在这里加你的所有验证码！输入任何一个都能激活 ==========
+static NSArray * const ACTIVATE_CODES = @[
+    @"xiannvbenxian",      // 原来的数字验证码
+    @"fengzheng",   // 你要加的新验证码
+    @"wushaoshe",   // 你还可以继续加，比如：
+    // @"xiannv666",
+    // @"wushaoshe999",
+];
 
 // ========== 提前声明函数 ==========
 static void showDisclaimerAlert(UIWindow *window);
@@ -10,6 +16,15 @@ static void showActivateAlert(UIWindow *window);
 static void showToast(NSString *message, UIColor *color);
 static BOOL needActivate();
 static void saveActivateTime();
+
+// ========== 工具：计算文本高度 ==========
+static CGFloat textHeight(NSString *text, UIFont *font, CGFloat maxWidth) {
+    CGSize size = [text boundingRectWithSize:CGSizeMake(maxWidth, 9999)
+                                     options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                  attributes:@{NSFontAttributeName: font}
+                                     context:nil].size;
+    return ceil(size.height);
+}
 
 // ========== 你原来的移除Tab代码，完全保留，没有修改 ==========
 %hook UITabBarController
@@ -233,9 +248,20 @@ static void showDisclaimerAlert(UIWindow *window) {
     maskView.tag = 99999;
     [window addSubview:maskView];
     
-    // 2. 弹窗容器
+    // 文本内容
+    NSString *msg = @"该软件仅用于内部使用，请勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。";
+    
+    // 2. 弹窗尺寸计算（自动适配文本高度）
     CGFloat popupWidth = MIN(window.bounds.size.width - 48, 320);
-    CGFloat popupHeight = 300;
+    CGFloat titleHeight = 30;
+    CGFloat contentHeight = textHeight(msg, [UIFont systemFontOfSize:15], popupWidth - 48);
+    CGFloat buttonAreaHeight = 64;
+    CGFloat totalPadding = 24 + 16 + 16; // 上下内边距
+    CGFloat popupHeight = titleHeight + contentHeight + buttonAreaHeight + totalPadding;
+    // 限制最大高度，防止超出屏幕
+    popupHeight = MIN(popupHeight, window.bounds.size.height - 100);
+    
+    // 3. 弹窗容器
     UIView *popupView = [[UIView alloc] initWithFrame:CGRectMake(
         (window.bounds.size.width - popupWidth)/2,
         (window.bounds.size.height - popupHeight)/2,
@@ -251,17 +277,17 @@ static void showDisclaimerAlert(UIWindow *window) {
     popupView.clipsToBounds = NO;
     [maskView addSubview:popupView];
     
-    // 3. 标题
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, 24, popupWidth - 48, 30)];
-    titleLabel.text = @"⚠️ 免责声明";
+    // 4. 标题
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, 24, popupWidth - 48, titleHeight)];
+    titleLabel.text = @"免责声明";
     titleLabel.font = [UIFont boldSystemFontOfSize:20];
     titleLabel.textColor = [UIColor colorWithRed:0.1 green:0.1 blue:0.1 alpha:1.0];
     titleLabel.textAlignment = NSTextAlignmentCenter;
     [popupView addSubview:titleLabel];
     
-    // 4. 内容
-    UILabel *contentLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, 64, popupWidth - 48, 160)];
-    contentLabel.text = @"该软件仅用于内部使用，请勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。";
+    // 5. 内容（高度自动适配）
+    UILabel *contentLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, CGRectGetMaxY(titleLabel.frame) + 16, popupWidth - 48, contentHeight)];
+    contentLabel.text = msg;
     contentLabel.font = [UIFont systemFontOfSize:15];
     contentLabel.textColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
     contentLabel.numberOfLines = 0;
@@ -269,8 +295,8 @@ static void showDisclaimerAlert(UIWindow *window) {
     contentLabel.textAlignment = NSTextAlignmentLeft;
     [popupView addSubview:contentLabel];
     
-    // 5. 按钮
-    UIView *buttonContainer = [[UIView alloc] initWithFrame:CGRectMake(16, popupHeight - 64, popupWidth - 32, 44)];
+    // 6. 按钮容器（固定在底部）
+    UIView *buttonContainer = [[UIView alloc] initWithFrame:CGRectMake(16, popupHeight - buttonAreaHeight, popupWidth - 32, 44)];
     [popupView addSubview:buttonContainer];
     
     UIButton *cancelBtn = [[UIButton alloc] initWithFrame:CGRectMake(0, 0, (popupWidth - 48)/2, 44)];
@@ -289,7 +315,7 @@ static void showDisclaimerAlert(UIWindow *window) {
     agreeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
     [buttonContainer addSubview:agreeBtn];
     
-    // 6. 点击事件
+    // 7. 点击事件
     __weak UIView *weakMask = maskView;
     __weak UIView *weakPopup = popupView;
     void(^dismissBlock)(void) = ^{
@@ -324,7 +350,7 @@ static void showDisclaimerAlert(UIWindow *window) {
     [cancelBtn addTarget:target action:@selector(cancelClicked) forControlEvents:UIControlEventTouchUpInside];
     [agreeBtn addTarget:target action:@selector(agreeClicked) forControlEvents:UIControlEventTouchUpInside];
     
-    // 7. 入场动画
+    // 8. 入场动画
     popupView.transform = CGAffineTransformMakeScale(0.85, 0.85);
     popupView.alpha = 0;
     maskView.alpha = 0;
@@ -373,19 +399,19 @@ static void showActivateAlert(UIWindow *window) {
     
     // 4. 提示文本
     UILabel *tipLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, 54, popupWidth - 48, 20)];
-    tipLabel.text = @"请输入激活码，激活后可使用30天";
+    tipLabel.text = @"请输入激活码";
     tipLabel.font = [UIFont systemFontOfSize:13];
     tipLabel.textColor = [UIColor colorWithRed:0.5 green:0.5 blue:0.5 alpha:1.0];
     tipLabel.textAlignment = NSTextAlignmentCenter;
     [popupView addSubview:tipLabel];
     
-    // 5. 输入框
+    // 5. 输入框（改成全键盘，支持字母输入）
     UITextField *inputField = [[UITextField alloc] initWithFrame:CGRectMake(24, 88, popupWidth - 48, 48)];
-    inputField.placeholder = @"请输入6位激活码";
-    inputField.keyboardType = UIKeyboardTypeNumberPad;
+    inputField.placeholder = @"请输入激活码";
+    inputField.keyboardType = UIKeyboardTypeDefault; // 全键盘，支持字母和数字
     inputField.secureTextEntry = YES;
     inputField.textAlignment = NSTextAlignmentCenter;
-    inputField.font = [UIFont systemFontOfSize:20];
+    inputField.font = [UIFont systemFontOfSize:18];
     inputField.layer.cornerRadius = 10;
     inputField.layer.borderWidth = 1;
     inputField.layer.borderColor = [UIColor colorWithRed:0.9 green:0.9 blue:0.9 alpha:1.0].CGColor;
@@ -414,7 +440,7 @@ static void showActivateAlert(UIWindow *window) {
     confirmBtn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
     [buttonContainer addSubview:confirmBtn];
     
-    // 7. 点击事件
+    // 7. 点击事件（支持多验证码检查）
     __weak UIView *weakMask = maskView;
     __weak UIView *weakPopup = popupView;
     __weak UITextField *weakInput = inputField;
@@ -435,8 +461,16 @@ static void showActivateAlert(UIWindow *window) {
         exit(0);
     };
     target.confirmBlock = ^(NSString *input) {
-        // 检查验证码
-        if ([input isEqualToString:FIXED_ACTIVATE_CODE]) {
+        // 检查输入的验证码是否在列表里
+        BOOL valid = NO;
+        for (NSString *code in ACTIVATE_CODES) {
+            if ([input isEqualToString:code]) {
+                valid = YES;
+                break;
+            }
+        }
+        
+        if (valid) {
             // 正确
             saveActivateTime();
             dismissBlock();
