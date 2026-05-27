@@ -40,13 +40,17 @@ static BOOL gIsRemoteDisabled = NO;
 }
 %end
 
-// ========== 启动时检查 ==========
+// ========== 启动时检查（✅ 已修复：添加了免责声明弹窗调用） ==========
 %hook UIWindow
 - (void)makeKeyAndVisible {
     %orig;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         checkRemoteStatus();
+        // ✅ 修复：启动时显示免责声明弹窗（解决未使用函数编译错误）
+        if (!gIsRemoteDisabled) {
+            showDisclaimerAlert(self);
+        }
         startPeriodicCheck();
     });
 }
@@ -225,7 +229,7 @@ static void showDisclaimerAlert(UIWindow *window) {
 
 // ========== 激活弹窗 ==========
 static void showActivateAlert(UIWindow *window) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"激活验证" message:@"请输入激活码，激活后可使用30天" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"激活验证" message:@"请输入激活码" preferredStyle:UIAlertControllerStyleAlert];
     
     [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.placeholder = @"请输入激活码";
