@@ -37,6 +37,23 @@ static NSString* generateCode() {
     return [NSString stringWithFormat:@"%06u", code];
 }
 
+// 兼容 iOS 13+ 获取 keyWindow
+static UIWindow *GetKeyWindow() {
+    UIWindow *window = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                window = windowScene.keyWindow;
+                if (window) break;
+            }
+        }
+    } else {
+        window = [UIApplication sharedApplication].keyWindow;
+    }
+    return window;
+}
+
 // 显示验证弹窗
 static void showVerifyAlert(UIWindow *window) {
     NSString *currentCode = generateCode();
@@ -151,7 +168,7 @@ static BOOL needVerify() {
     %orig;
     
     if (needVerify()) {
-        UIWindow *window = [UIApplication sharedApplication].keyWindow;
+        UIWindow *window = GetKeyWindow();
         if (window) {
             showVerifyAlert(window);
         }
