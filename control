@@ -1,0 +1,9 @@
+Package: com.yourname.hidemytab
+Name: HideMyTab
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Hide "My" tab from app
+Maintainer: Your Name
+Author: Your Name
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000)
