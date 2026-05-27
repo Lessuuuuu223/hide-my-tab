@@ -8,15 +8,17 @@ static NSArray * const ACTIVATE_CODES = @[
     @"wushaoshe",
 ];
 
-// ========== 远程停用配置 ==========
+// ========== 远程停用配置（已确认链接正确） ==========
 static NSString * const kRemoteStatusURL = @"https://gitee.com/huang-xuxuxuxu/hide-my-tab-control/raw/master/status.json";
-static NSTimeInterval const kCheckInterval = 180; // 3分钟检测一次
+static NSTimeInterval const kCheckInterval = 60; // ✅ 已修改：每1分钟检测一次
 
 // ========== 提前声明函数 ==========
 static void showDisclaimerAlert(UIWindow *window);
 static void showActivateAlert(UIWindow *window);
 static void showToast(NSString *message, UIColor *color);
+static void showRemainingDaysAlert(UIWindow *window, void (^completion)(void));
 static BOOL needActivate();
+static NSInteger getRemainingDays();
 static void saveActivateTime();
 static void checkRemoteStatus(void);
 static void showDisabledAlert(void);
@@ -40,14 +42,13 @@ static BOOL gIsRemoteDisabled = NO;
 }
 %end
 
-// ========== 启动时检查（✅ 已修复：添加了免责声明弹窗调用） ==========
+// ========== 启动时检查（启动立即自检一次远程状态） ==========
 %hook UIWindow
 - (void)makeKeyAndVisible {
     %orig;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        checkRemoteStatus();
-        // ✅ 修复：启动时显示免责声明弹窗（解决未使用函数编译错误）
+        checkRemoteStatus(); // ✅ 启动立即自检一次远程值
         if (!gIsRemoteDisabled) {
             showDisclaimerAlert(self);
         }
@@ -56,7 +57,7 @@ static BOOL gIsRemoteDisabled = NO;
 }
 %end
 
-// ========== 获取正确Window（修复编译报错） ==========
+// ========== 获取正确Window ==========
 static UIWindow *getKeyWindow(void) {
     if (@available(iOS 13.0, *)) {
         for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
@@ -72,7 +73,7 @@ static UIWindow *getKeyWindow(void) {
     return [UIApplication sharedApplication].windows.firstObject;
 }
 
-// ========== 定时循环检测（修复QOS报错） ==========
+// ========== 定时循环检测 ==========
 static void startPeriodicCheck(void) {
     dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
@@ -126,7 +127,7 @@ static void showDisabledAlert(void) {
     if (shown) return;
     shown = YES;
     
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚠️ 已停用" message:@"该软件已被管理员停用，请联系作者获取服务。" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚠️ 已停用" message:@"该软件已停用，请联系乌梢蛇。" preferredStyle:UIAlertControllerStyleAlert];
     UIAlertAction *exitBtn = [UIAlertAction actionWithTitle:@"退出" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *act) {
         exit(0);
     }];
@@ -171,14 +172,54 @@ static void showToast(NSString *message, UIColor *color) {
     }];
 }
 
-// ========== 激活逻辑 ==========
-static BOOL needActivate() {
+// ========== 新增：获取剩余激活天数 ==========
+static NSInteger getRemainingDays() {
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     id obj = [ud objectForKey:@"hmt_last_activate_time"];
-    if (!obj || ![obj isKindOfClass:[NSNumber class]]) return YES;
+    if (!obj || ![obj isKindOfClass:[NSNumber class]]) return 0;
+    
     NSTimeInterval last = [(NSNumber *)obj doubleValue];
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    return (now - last) > 2592000;
+    NSTimeInterval totalSeconds = 2592000; // 30天总秒数
+    NSTimeInterval elapsed = now - last;
+    
+    if (elapsed >= totalSeconds) {
+        return 0;
+    } else {
+        return (NSInteger)ceil((totalSeconds - elapsed) / 86400); // 向上取整天数
+    }
+}
+
+// ========== 新增：剩余天数弹窗（2秒自动关闭） ==========
+static void showRemainingDaysAlert(UIWindow *window, void (^completion)(void)) {
+    NSInteger days = getRemainingDays();
+    NSString *message;
+    
+    if (days == 0) {
+        message = @"您的激活已过期，请重新激活";
+    } else {
+        message = [NSString stringWithFormat:@"剩余激活天数：%ld天", (long)days];
+    }
+    
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"激活状态" 
+                                                                   message:message 
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    
+    [window.rootViewController presentViewController:alert animated:YES completion:^{
+        // ✅ 2秒后自动关闭弹窗并执行后续操作
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            [alert dismissViewControllerAnimated:YES completion:^{
+                if (completion) {
+                    completion();
+                }
+            }];
+        });
+    }];
+}
+
+// ========== 激活逻辑 ==========
+static BOOL needActivate() {
+    return getRemainingDays() == 0;
 }
 
 static void saveActivateTime() {
@@ -211,9 +252,12 @@ static void showDisclaimerAlert(UIWindow *window) {
     }];
     
     UIAlertAction *agree = [UIAlertAction actionWithTitle:@"我已知晓" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        if (needActivate()) {
-            showActivateAlert(window);
-        }
+        // ✅ 点击"我已知晓"后先显示剩余天数弹窗，2秒后自动关闭再检查激活
+        showRemainingDaysAlert(window, ^{
+            if (needActivate()) {
+                showActivateAlert(window);
+            }
+        });
     }];
     
     if (@available(iOS 13.0, *)) {
@@ -252,7 +296,7 @@ static void showActivateAlert(UIWindow *window) {
         }
         if (ok) {
             saveActivateTime();
-            showToast(@"✅ 激活成功", [UIColor colorWithRed:0.2 green:0.7 blue:0.3 alpha:1]);
+            showToast(@"✅ 激活成功，有效期30天", [UIColor colorWithRed:0.2 green:0.7 blue:0.3 alpha:1]);
         } else {
             showToast(@"❌ 验证码错误，请重试", [UIColor colorWithRed:0.8 green:0.2 blue:0.2 alpha:1]);
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
