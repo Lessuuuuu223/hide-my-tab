@@ -34,10 +34,17 @@ static NSArray* getTodayActivateCodes() {
     ];
 }
 
-// ========== 检查激活是否过期（30天）==========
+// ========== 检查激活是否过期（30天）- 加了严格的类型校验 ==========
 static BOOL needActivate() {
-    NSDate *lastActivate = [[NSUserDefaults standardUserDefaults] objectForKey:@"hmta_last_activate"];
-    if (!lastActivate) return YES;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    id obj = [defaults objectForKey:@"hmta_last_activate"];
+    
+    // 严格校验：必须存在且是NSDate类型，否则都当成需要重新激活
+    if (!obj || ![obj isKindOfClass:[NSDate class]]) {
+        return YES;
+    }
+    
+    NSDate *lastActivate = (NSDate *)obj;
     NSTimeInterval diff = [[NSDate date] timeIntervalSinceDate:lastActivate];
     return diff > 2592000;
 }
