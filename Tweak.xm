@@ -357,7 +357,8 @@ static void startSecurityFlow(UIWindow *window) {
 
 %end
 
-%hook UIApplicationDelegate
+// ========== 修复：原来错误Hook了协议，现在改成Hook NSObject，兼容所有AppDelegate ==========
+%hook NSObject
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
     %orig;
