@@ -154,11 +154,11 @@ static void saveActivateTime() {
     [defaults synchronize];
 }
 
-// ========== 原生免责声明弹窗（修改版：文字加粗加大 + 按钮颜色修改） ==========
+// ========== 原生免责声明弹窗（修复语法错误） ==========
 static void showDisclaimerAlert(UIWindow *window) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@" " message:@"" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"声明" message:@"" preferredStyle:UIAlertControllerStyleAlert];
     
-    // 1. 标题字体加粗加大（系统原生默认标题字体已经是加粗的，这里额外放大）
+    // 标题字体加粗加大
     if (@available(iOS 13.0, *)) {
         NSMutableAttributedString *titleAttr = [[NSMutableAttributedString alloc] initWithString:@"声明" attributes:@{
             NSFontAttributeName: [UIFont boldSystemFontOfSize:20],
@@ -167,15 +167,15 @@ static void showDisclaimerAlert(UIWindow *window) {
         [alert setValue:titleAttr forKey:@"attributedTitle"];
     }
     
-    // 2. 正文文字加粗加大
-    NSString *msg = @"该软件仅用于内部使用，勿流传，勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。";
+    // 正文文字加粗加大
+    NSString *msg = @"该软件仅用于内部使用，切勿传播，勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。";
     NSMutableAttributedString *msgAttr = [[NSMutableAttributedString alloc] initWithString:msg attributes:@{
-        NSFontAttributeName: [UIFont boldSystemFontOfSize:17], // 比系统默认更大更粗
+        NSFontAttributeName: [UIFont boldSystemFontOfSize:17],
         NSForegroundColorAttributeName: [UIColor blackColor]
     }];
     [alert setValue:msgAttr forKey:@"attributedMessage"];
     
-    // 3. 按钮
+    // 按钮
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
         exit(0);
     }];
@@ -185,12 +185,12 @@ static void showDisclaimerAlert(UIWindow *window) {
         }
     }];
     
-    // 4. 把「我已知晓」按钮改成红色
+    // 「我已知晓」按钮改成红色（修复语法错误）
     if (@available(iOS 13.0, *)) {
         [agree setValue:[UIColor redColor] forKey:@"titleTextColor"];
     } else {
-        // 兼容旧版本
-        [alert.view tintColor = [UIColor redColor];
+        // 旧版本兼容：直接设置alert的tintColor，去掉多余的[
+        alert.view.tintColor = [UIColor redColor];
     }
     
     [alert addAction:cancel];
