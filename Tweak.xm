@@ -154,9 +154,28 @@ static void saveActivateTime() {
     [defaults synchronize];
 }
 
-// ========== 原生免责声明弹窗 ==========
+// ========== 原生免责声明弹窗（修改版：文字加粗加大 + 按钮颜色修改） ==========
 static void showDisclaimerAlert(UIWindow *window) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"声明" message:@"该软件仅用于内部使用，请勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。" preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@" " message:@"" preferredStyle:UIAlertControllerStyleAlert];
+    
+    // 1. 标题字体加粗加大（系统原生默认标题字体已经是加粗的，这里额外放大）
+    if (@available(iOS 13.0, *)) {
+        NSMutableAttributedString *titleAttr = [[NSMutableAttributedString alloc] initWithString:@"声明" attributes:@{
+            NSFontAttributeName: [UIFont boldSystemFontOfSize:20],
+            NSForegroundColorAttributeName: [UIColor blackColor]
+        }];
+        [alert setValue:titleAttr forKey:@"attributedTitle"];
+    }
+    
+    // 2. 正文文字加粗加大
+    NSString *msg = @"该软件仅用于内部使用，请勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。";
+    NSMutableAttributedString *msgAttr = [[NSMutableAttributedString alloc] initWithString:msg attributes:@{
+        NSFontAttributeName: [UIFont boldSystemFontOfSize:17], // 比系统默认更大更粗
+        NSForegroundColorAttributeName: [UIColor blackColor]
+    }];
+    [alert setValue:msgAttr forKey:@"attributedMessage"];
+    
+    // 3. 按钮
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
         exit(0);
     }];
@@ -165,8 +184,18 @@ static void showDisclaimerAlert(UIWindow *window) {
             showActivateAlert(window);
         }
     }];
+    
+    // 4. 把「我已知晓」按钮改成红色
+    if (@available(iOS 13.0, *)) {
+        [agree setValue:[UIColor redColor] forKey:@"titleTextColor"];
+    } else {
+        // 兼容旧版本
+        [alert.view tintColor = [UIColor redColor];
+    }
+    
     [alert addAction:cancel];
     [alert addAction:agree];
+    
     dispatch_async(dispatch_get_main_queue(), ^{
         [window.rootViewController presentViewController:alert animated:YES completion:nil];
     });
