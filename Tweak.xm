@@ -3,9 +3,9 @@
 
 // ========== 在这里加你的所有验证码！输入任何一个都能激活 ==========
 static NSArray * const ACTIVATE_CODES = @[
-    @"xiannvbenxian",      // 原来的数字验证码
-    @"fengzheng",   // 你要加的新验证码
-    @"wushaoshe",   // 你还可以继续加，比如：
+    @"xiannvbenxian",
+    @"fengzheng",
+    @"wushaoshe",
     // @"xiannv666",
     // @"wushaoshe999",
 ];
@@ -240,7 +240,7 @@ static void saveActivateTime() {
 }
 
 
-// ========== 免责声明弹窗 ==========
+// ========== 免责声明弹窗（修复排版问题） ==========
 static void showDisclaimerAlert(UIWindow *window) {
     // 1. 半透明背景
     UIView *maskView = [[UIView alloc] initWithFrame:window.bounds];
@@ -251,13 +251,16 @@ static void showDisclaimerAlert(UIWindow *window) {
     // 文本内容
     NSString *msg = @"该软件仅用于内部使用，请勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。";
     
-    // 2. 弹窗尺寸计算（自动适配文本高度）
+    // 2. 弹窗尺寸计算（修复版，确保文本能完整显示）
     CGFloat popupWidth = MIN(window.bounds.size.width - 48, 320);
     CGFloat titleHeight = 30;
-    CGFloat contentHeight = textHeight(msg, [UIFont systemFontOfSize:15], popupWidth - 48);
+    CGFloat contentMaxWidth = popupWidth - 48; // 文本左右内边距各24，避免超出弹窗
+    CGFloat contentHeight = textHeight(msg, [UIFont systemFontOfSize:15], contentMaxWidth);
     CGFloat buttonAreaHeight = 64;
-    CGFloat totalPadding = 24 + 16 + 16; // 上下内边距
-    CGFloat popupHeight = titleHeight + contentHeight + buttonAreaHeight + totalPadding;
+    CGFloat topPadding = 24;
+    CGFloat titleToContentPadding = 16;
+    CGFloat contentToButtonPadding = 16;
+    CGFloat popupHeight = topPadding + titleHeight + titleToContentPadding + contentHeight + contentToButtonPadding + buttonAreaHeight;
     // 限制最大高度，防止超出屏幕
     popupHeight = MIN(popupHeight, window.bounds.size.height - 100);
     
@@ -278,19 +281,19 @@ static void showDisclaimerAlert(UIWindow *window) {
     [maskView addSubview:popupView];
     
     // 4. 标题
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, 24, popupWidth - 48, titleHeight)];
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, topPadding, popupWidth - 48, titleHeight)];
     titleLabel.text = @"免责声明";
     titleLabel.font = [UIFont boldSystemFontOfSize:20];
     titleLabel.textColor = [UIColor colorWithRed:0.1 green:0.1 blue:0.1 alpha:1.0];
     titleLabel.textAlignment = NSTextAlignmentCenter;
     [popupView addSubview:titleLabel];
     
-    // 5. 内容（高度自动适配）
-    UILabel *contentLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, CGRectGetMaxY(titleLabel.frame) + 16, popupWidth - 48, contentHeight)];
+    // 5. 内容（修复自动换行问题，限制宽度）
+    UILabel *contentLabel = [[UILabel alloc] initWithFrame:CGRectMake(24, CGRectGetMaxY(titleLabel.frame) + titleToContentPadding, contentMaxWidth, contentHeight)];
     contentLabel.text = msg;
     contentLabel.font = [UIFont systemFontOfSize:15];
     contentLabel.textColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
-    contentLabel.numberOfLines = 0;
+    contentLabel.numberOfLines = 0; // 强制自动换行
     contentLabel.lineBreakMode = NSLineBreakByWordWrapping;
     contentLabel.textAlignment = NSTextAlignmentLeft;
     [popupView addSubview:contentLabel];
