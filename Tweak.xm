@@ -90,12 +90,11 @@ static BOOL needVerify() {
     return diff > 2592000;
 }
 
-// ========== 防重复标志 ==========
-static BOOL gIsVerifying = NO;
-static BOOL gRemoteChecking = NO;
-static BOOL gHasShownOnce = NO;  // 防止重复弹窗
+// ========== 状态管理 ==========
+static BOOL gIsVerifying = NO;      // 是否正在验证流程中
+static BOOL gRemoteChecking = NO; // 是否正在检查远程状态
 
-// ========== 远程停用检查（支持多URL轮询） ==========
+// ========== 远程停用检查 ==========
 
 static void checkRemoteStatusWithURLs(NSArray *urls, NSUInteger index, UIWindow *window, void (^onContinue)(void)) {
     if (index >= urls.count) {
@@ -152,10 +151,41 @@ static void checkRemoteStatus(UIWindow *window, void (^onContinue)(void)) {
     checkRemoteStatusWithURLs(REMOTE_URLS, 0, window, onContinue);
 }
 
-// ========== 免责声明弹窗（字体加大，乌梢蛇标红加粗） ==========
+// ========== Toast 提示（不 dismiss 原弹窗） ==========
+
+static void showToast(NSString *message) {
+    UIWindow *window = GetKeyWindow();
+    if (!window) return;
+    
+    UILabel *label = [[UILabel alloc] init];
+    label.text = message;
+    label.textColor = [UIColor whiteColor];
+    label.backgroundColor = [UIColor colorWithWhite:0 alpha:0.8];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.font = [UIFont systemFontOfSize:16];
+    label.layer.cornerRadius = 8;
+    label.layer.masksToBounds = YES;
+    
+    CGSize size = [message boundingRectWithSize:CGSizeMake(250, 999)
+                                        options:NSStringDrawingUsesLineFragmentOrigin
+                                     attributes:@{NSFontAttributeName: label.font}
+                                        context:nil].size;
+    label.frame = CGRectMake(0, 0, size.width + 30, size.height + 20);
+    label.center = CGPointMake(window.center.x, window.center.y - 80);
+    
+    [window addSubview:label];
+    
+    [UIView animateWithDuration:0.3 delay:1.5 options:UIViewAnimationOptionCurveEaseIn animations:^{
+        label.alpha = 0;
+    } completion:^(BOOL finished) {
+        [label removeFromSuperview];
+    }];
+}
+
+// ========== 免责声明弹窗 ==========
 
 static void showDisclaimerAlert(UIWindow *window, void (^onAgree)(void)) {
-    NSString *msg = @"该软件仅用于内部研究使用，禁止向外流通，禁止用于任何非法用途。\n\n有任何问题联系【乌梢蛇】处理";
+    NSString *msg = @"该软件仅用于内部研究使用，禁止向外流通，禁止用于任何非法用途。\n\n有任何问题联系乌梢蛇处理";
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"免责声明"
                                                                   message:msg
@@ -187,14 +217,14 @@ static void showDisclaimerAlert(UIWindow *window, void (^onAgree)(void)) {
     [window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 
-// ========== 验证码弹窗（显示设备码 + 一键复制） ==========
+// ========== 验证码弹窗（带复制设备码，不 dismiss） ==========
 
 static void showVerifyAlert(UIWindow *window) {
     NSString *deviceCode = formatDeviceCode(getDeviceCode());
     NSString *currentCode = generateCode();
     NSLog(@"[HideMyTab] Device: %@ | Code: %@", deviceCode, currentCode);
     
-    NSString *msg = [NSString stringWithFormat:@"设备码: %@\n\n请输入6位动态验证码\n（验证码每30秒更新）", deviceCode];
+    NSString *msg = [NSString stringWithFormat:@"设备码: %@\n\n请输入6位动态验证码\n（验证码每30秒更新，请联系你的上级）", deviceCode];
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"安全验证"
                                                                   message:msg
@@ -208,29 +238,25 @@ static void showVerifyAlert(UIWindow *window) {
         textField.font = [UIFont systemFontOfSize:20];
     }];
     
-    // 复制设备码按钮（绿色）
+    // 复制设备码按钮（绿色，不 dismiss 弹窗）
     UIAlertAction *copyAction = [UIAlertAction actionWithTitle:@"📋 复制设备码" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
         pasteboard.string = deviceCode;
-        // 复制后重新弹出提示
-        UIAlertController *copied = [UIAlertController alertControllerWithTitle:@"已复制"
-                                                                      message:@"设备码已复制到剪贴板"
-                                                               preferredStyle:UIAlertControllerStyleAlert];
-        UIAlertAction *ok = [UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil];
-        [copied addAction:ok];
-        [window.rootViewController presentViewController:copied animated:YES completion:nil];
+        showToast(@"设备码已复制到剪贴板");
+        // 不 dismiss，用户继续输入验证码
     }];
     
     UIAlertAction *confirm = [UIAlertAction actionWithTitle:@"验证并进入" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *input = alert.textFields.firstObject.text;
         if ([input isEqualToString:currentCode]) {
+            // 验证成功，记录30天有效期
             NSDate *now = [NSDate date];
             [[NSUserDefaults standardUserDefaults] setObject:now forKey:@"last_verify_time"];
             [[NSUserDefaults standardUserDefaults] synchronize];
             NSLog(@"[HideMyTab] Verify success");
             gIsVerifying = NO;
-            gHasShownOnce = YES;
         } else {
+            // 验证失败，直接退出
             gIsVerifying = NO;
             exit(0);
         }
@@ -252,7 +278,7 @@ static void showVerifyAlert(UIWindow *window) {
 
 static void startSecurityFlow(UIWindow *window) {
     if (gIsVerifying) return;
-    if (gHasShownOnce && !needVerify()) return;  // 已验证过且未过期，跳过
+    if (!needVerify()) return;  // 30天内已验证，直接放行
     
     gIsVerifying = YES;
     
@@ -300,19 +326,24 @@ static void startSecurityFlow(UIWindow *window) {
     
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        // 延迟1.5秒，等App完全初始化完成再弹窗
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        // 延迟2秒，等App完全初始化
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             UIWindow *keyWindow = GetKeyWindow();
             if (!keyWindow) keyWindow = self;
             
-            // 确保rootViewController已设置
+            // 确保 rootViewController 已设置且稳定
             if (!keyWindow.rootViewController) {
-                NSLog(@"[HideMyTab] rootViewController not ready, retrying...");
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                NSLog(@"[HideMyTab] rootViewController not ready, retrying in 2s...");
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     UIWindow *retryWindow = GetKeyWindow() ?: self;
-                    checkRemoteStatus(retryWindow, ^{
-                        startSecurityFlow(retryWindow);
-                    });
+                    if (retryWindow.rootViewController) {
+                        checkRemoteStatus(retryWindow, ^{
+                            startSecurityFlow(retryWindow);
+                        });
+                    } else {
+                        NSLog(@"[HideMyTab] rootViewController still nil, giving up");
+                        gIsVerifying = NO;
+                    }
                 });
                 return;
             }
@@ -331,17 +362,15 @@ static void startSecurityFlow(UIWindow *window) {
 - (void)applicationDidBecomeActive:(UIApplication *)application {
     %orig;
     
-    // 首次启动已在 makeKeyAndVisible 中处理，这里直接跳过
-    static BOOL hasEnteredForeground = NO;
-    if (!hasEnteredForeground) {
-        hasEnteredForeground = YES;
-        return;
+    static BOOL firstLaunch = YES;
+    if (firstLaunch) {
+        firstLaunch = NO;
+        return; // 首次启动已在 makeKeyAndVisible 中处理
     }
     
-    // 后台返回时，如果已验证过且未过期，不再重复弹窗
-    if (gHasShownOnce && !needVerify()) return;
+    // 后台返回，如果30天过期才重新验证
+    if (!needVerify()) return;
     
-    // 延迟检查，避免与UI初始化冲突
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIWindow *window = GetKeyWindow();
         if (window && window.rootViewController) {
