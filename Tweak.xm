@@ -168,7 +168,7 @@ static void showDisclaimerAlert(UIWindow *window) {
     }
     
     // 2. 正文文字加粗加大
-    NSString *msg = @"该软件仅用于内部使用，请勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。";
+    NSString *msg = @"该软件仅用于内部使用，勿流传，勿用于非法用途，违者后果自负。\n\n软件有问题联系【乌梢蛇】处理，其他问题一概不知。";
     NSMutableAttributedString *msgAttr = [[NSMutableAttributedString alloc] initWithString:msg attributes:@{
         NSFontAttributeName: [UIFont boldSystemFontOfSize:17], // 比系统默认更大更粗
         NSForegroundColorAttributeName: [UIColor blackColor]
