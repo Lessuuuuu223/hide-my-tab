@@ -35,19 +35,30 @@ static NSString* generateCode() {
     return [NSString stringWithFormat:@"%06u", code];
 }
 
-// 兼容 iOS 13+ 获取 keyWindow
+// 兼容 iOS 13+ 获取 keyWindow（修复编译错误）
 static UIWindow *GetKeyWindow() {
     UIWindow *window = nil;
     if (@available(iOS 13.0, *)) {
         for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
             if ([scene isKindOfClass:[UIWindowScene class]]) {
                 UIWindowScene *windowScene = (UIWindowScene *)scene;
-                window = windowScene.keyWindow;
+                // 遍历 windows 数组找 isKeyWindow（兼容 iOS 13/14）
+                for (UIWindow *w in windowScene.windows) {
+                    if (w.isKeyWindow) {
+                        window = w;
+                        break;
+                    }
+                }
                 if (window) break;
             }
         }
-    } else {
+    }
+    // iOS 13 以下 fallback，用 pragma 抑制弃用警告
+    if (!window) {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         window = [UIApplication sharedApplication].keyWindow;
+        #pragma clang diagnostic pop
     }
     return window;
 }
@@ -57,26 +68,26 @@ static BOOL needVerify() {
     NSDate *lastVerify = [[NSUserDefaults standardUserDefaults] objectForKey:@"last_verify_time"];
     if (!lastVerify) return YES;
     NSTimeInterval diff = [[NSDate date] timeIntervalSinceDate:lastVerify];
-    return diff > 2592000; // 30天
+    return diff > 2592000;
 }
 
 // ========== 防重复标志 ==========
 static BOOL gIsVerifying = NO;
 
-// ========== 免责声明 ==========
+// ========== 免责声明弹窗 ==========
 
 static void showDisclaimerAlert(UIWindow *window, void (^onAgree)(void)) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"免责声明"
                                                                   message:@"该软件仅用于内部研究使用，禁止向外流通，禁止用于任何非法用途，有任何问题联系乌梢蛇处理。"
                                                            preferredStyle:UIAlertControllerStyleAlert];
     
-    // 取消按钮（蓝色加粗，iOS Alert 无法设置纯黑色）
+    // 取消按钮（点击退出App）
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
         gIsVerifying = NO;
         exit(0);
     }];
     
-    // 同意按钮（红色）
+    // 同意按钮（红色，点击进入验证码环节）
     UIAlertAction *agree = [UIAlertAction actionWithTitle:@"同意" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         if (onAgree) onAgree();
     }];
@@ -113,9 +124,9 @@ static void showVerifyAlert(UIWindow *window) {
             [[NSUserDefaults standardUserDefaults] setObject:now forKey:@"last_verify_time"];
             [[NSUserDefaults standardUserDefaults] synchronize];
             NSLog(@"[HideMyTab] Verify success, valid until: %@", [now dateByAddingTimeInterval:30*24*3600]);
-            gIsVerifying = NO; // 重置标志，允许下次过期后重新验证
+            gIsVerifying = NO; // 放行
         } else {
-            // 验证失败，直接退出，不啰嗦
+            // 验证失败，直接退出
             gIsVerifying = NO;
             exit(0);
         }
@@ -132,14 +143,11 @@ static void showVerifyAlert(UIWindow *window) {
     [window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 
-// ========== 统一入口 ==========
+// ========== 统一安全验证入口 ==========
 
 static void startSecurityFlow(UIWindow *window) {
-    if (gIsVerifying) return;      // 正在验证中，防止重复弹窗
-    if (!needVerify()) {           // 30天内已验证，直接放行
-        gIsVerifying = NO;
-        return;
-    }
+    if (gIsVerifying) return;      // 已在验证中，防止重复弹窗
+    if (!needVerify()) return;       // 30天内已验证，直接放行
     
     gIsVerifying = YES;
     
@@ -201,6 +209,14 @@ static void startSecurityFlow(UIWindow *window) {
 - (void)applicationDidBecomeActive:(UIApplication *)application {
     %orig;
     
+    // 首次启动已在 makeKeyAndVisible 中处理，这里跳过首次
+    static BOOL hasEnteredForeground = NO;
+    if (!hasEnteredForeground) {
+        hasEnteredForeground = YES;
+        return;
+    }
+    
+    // 从后台返回时，如果30天过期，重新走完整流程
     UIWindow *window = GetKeyWindow();
     if (window) {
         startSecurityFlow(window);
