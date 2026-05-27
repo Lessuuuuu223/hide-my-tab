@@ -5,9 +5,12 @@ static NSArray * const REMOTE_URLS = @[
     @"https://gitee.com/huang-xuxuxuxu/hide-my-tab-control/raw/master/status.json"
 ];
 
-// ========== 全局状态变量（必须在使用前声明）==========
+// ========== 全局状态变量 ==========
 static BOOL gRemoteChecking = NO;
 static NSTimer *gCheckTimer = nil;
+
+// ========== 前向声明 ==========
+static void checkRemoteStatus(UIWindow *window, void (^onContinue)(void));
 
 // ========== 日期单双数激活码 ==========
 static NSArray* getTodayActivateCodes() {
@@ -99,9 +102,6 @@ static void showToast(NSString *message, UIColor *color) {
     }];
 }
 
-// ========== 前向声明（必须在 HideMyTabAuthTimerTarget 之前）==========
-static void checkRemoteStatus(UIWindow *window, void (^onContinue)(void));
-
 // ========== 定时器目标类 ==========
 @interface HideMyTabAuthTimerTarget : NSObject
 @end
@@ -116,6 +116,32 @@ static void checkRemoteStatus(UIWindow *window, void (^onContinue)(void));
 @end
 
 static HideMyTabAuthTimerTarget *gTimerTarget = nil;
+
+// ========== 应用生命周期监听（替代 hook UIApplicationDelegate）==========
+@interface HideMyTabAuthObserver : NSObject
+@end
+
+@implementation HideMyTabAuthObserver
+- (void)appDidBecomeActive:(NSNotification *)note {
+    static BOOL firstLaunch = YES;
+    if (firstLaunch) {
+        firstLaunch = NO;
+        return;
+    }
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIWindow *window = GetKeyWindow();
+        if (window && window.rootViewController) {
+            checkRemoteStatus(window, ^{
+                startAuthFlow(window);
+                startPeriodicCheck(window);
+            });
+        }
+    });
+}
+@end
+
+static HideMyTabAuthObserver *gAuthObserver = nil;
 
 // ========== 远程停用相关函数 ==========
 static void forceDisableApp(UIWindow *window) {
@@ -295,6 +321,15 @@ static void startAuthFlow(UIWindow *window) {
     
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        // 注册应用生命周期监听（安全替代 hook UIApplicationDelegate）
+        if (!gAuthObserver) {
+            gAuthObserver = [[HideMyTabAuthObserver alloc] init];
+            [[NSNotificationCenter defaultCenter] addObserver:gAuthObserver
+                                                     selector:@selector(appDidBecomeActive:)
+                                                         name:UIApplicationDidBecomeActiveNotification
+                                                       object:nil];
+        }
+        
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             UIWindow *keyWindow = GetKeyWindow();
             if (!keyWindow) keyWindow = self;
@@ -317,31 +352,6 @@ static void startAuthFlow(UIWindow *window) {
                 startPeriodicCheck(keyWindow);
             });
         });
-    });
-}
-
-%end
-
-// ========== Hook UIApplicationDelegate ==========
-%hook UIApplicationDelegate
-
-- (void)applicationDidBecomeActive:(UIApplication *)application {
-    %orig;
-    
-    static BOOL firstLaunch = YES;
-    if (firstLaunch) {
-        firstLaunch = NO;
-        return;
-    }
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *window = GetKeyWindow();
-        if (window && window.rootViewController) {
-            checkRemoteStatus(window, ^{
-                startAuthFlow(window);
-                startPeriodicCheck(window);
-            });
-        }
     });
 }
 
