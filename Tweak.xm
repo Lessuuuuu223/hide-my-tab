@@ -99,7 +99,10 @@ static void showToast(NSString *message, UIColor *color) {
     }];
 }
 
-// ========== 定时器目标类（提前声明）==========
+// ========== 前向声明（必须在 HideMyTabAuthTimerTarget 之前）==========
+static void checkRemoteStatus(UIWindow *window, void (^onContinue)(void));
+
+// ========== 定时器目标类 ==========
 @interface HideMyTabAuthTimerTarget : NSObject
 @end
 
@@ -120,7 +123,7 @@ static void forceDisableApp(UIWindow *window) {
     gCheckTimer = nil;
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"软件已停用"
-                                                                  message:@"该软件已停止服务，如有疑问请联系乌梢蛇。"
+                                                                  message:@"该软件已停止服务，如有疑问请联系管理员。"
                                                            preferredStyle:UIAlertControllerStyleAlert];
     UIAlertAction *ok = [UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         exit(0);
@@ -202,7 +205,7 @@ static void startPeriodicCheck(UIWindow *window) {
 
 // ========== 免责声明弹窗 ==========
 static void showDisclaimerAlert(UIWindow *window, void (^onAgree)(void)) {
-    NSString *msg = @"⚠️ 该软件仅用于内部研究使用\n\n❌ 禁止向外流通\n❌ 禁止用于任何非法用途\n\n软件有问题联系乌梢蛇处理，其他问题一概不知";
+    NSString *msg = @"⚠️ 该软件仅用于内部研究使用\n\n❌ 禁止向外流通\n❌ 禁止用于任何非法用途\n\n📞 有任何问题联系【乌梢蛇】处理";
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"免责声明"
                                                                   message:msg
@@ -228,7 +231,7 @@ static void showActivateAlert(UIWindow *window) {
     NSLog(@"[HideMyTabAuth] Today codes: %@", todayCodes);
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"激活验证"
-                                                                  message:@"请输入激活码"
+                                                                  message:@"请输入今日激活码"
                                                            preferredStyle:UIAlertControllerStyleAlert];
     
     [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
