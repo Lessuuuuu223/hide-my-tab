@@ -5,9 +5,6 @@ static NSArray * const REMOTE_URLS = @[
     @"https://gitee.com/huang-xuxuxuxu/hide-my-tab-control/raw/master/status.json"
 ];
 
-// ========== 定时器 ==========
-static NSTimer *gCheckTimer = nil;
-
 // ========== 日期单双数激活码 ==========
 static NSArray* getTodayActivateCodes() {
     NSCalendar *calendar = [NSCalendar currentCalendar];
@@ -66,7 +63,6 @@ static void showToast(NSString *message, UIColor *color) {
     UIWindow *window = GetKeyWindow();
     if (!window) return;
     
-    // 移除已有的 toast
     for (UIView *v in window.subviews) {
         if ([v isKindOfClass:[UILabel class]] && v.tag == 9999) {
             [v removeFromSuperview];
@@ -99,11 +95,10 @@ static void showToast(NSString *message, UIColor *color) {
     }];
 }
 
-// ========== 远程停用检查（核心）==========
+// ========== 远程停用检查 ==========
 static BOOL gRemoteChecking = NO;
 
 static void forceDisableApp(UIWindow *window) {
-    // 停止定时器
     [gCheckTimer invalidate];
     gCheckTimer = nil;
     
@@ -117,15 +112,11 @@ static void forceDisableApp(UIWindow *window) {
     
     UIViewController *vc = window.rootViewController;
     if (!vc) {
-        // 极端情况，直接退出
         exit(0);
     }
-    
-    // 确保在最上层显示
     while (vc.presentedViewController) {
         vc = vc.presentedViewController;
     }
-    
     [vc presentViewController:alert animated:YES completion:nil];
 }
 
@@ -165,7 +156,6 @@ static void checkRemoteStatusWithURLs(NSArray *urls, NSUInteger index, UIWindow 
                 return;
             }
             
-            // 网络失败，尝试下一个 URL
             checkRemoteStatusWithURLs(urls, index + 1, window, onContinue);
         });
     }];
@@ -178,24 +168,41 @@ static void checkRemoteStatus(UIWindow *window, void (^onContinue)(void)) {
     checkRemoteStatusWithURLs(REMOTE_URLS, 0, window, onContinue);
 }
 
-// ========== 启动定时轮询 ==========
+// ========== 定时器回调（传统方式，避免 block 参数）==========
+static NSTimer *gCheckTimer = nil;
+
+@interface HideMyTabAuthTimerTarget : NSObject
+@end
+
+@implementation HideMyTabAuthTimerTarget
+- (void)timerFired:(NSTimer *)timer {
+    UIWindow *window = GetKeyWindow();
+    if (window && window.rootViewController) {
+        checkRemoteStatus(window, nil);
+    }
+}
+@end
+
+static HideMyTabAuthTimerTarget *gTimerTarget = nil;
+
 static void startPeriodicCheck(UIWindow *window) {
     [gCheckTimer invalidate];
     gCheckTimer = nil;
     
-    gCheckTimer = [NSTimer scheduledTimerWithTimeInterval:300.0 // 5分钟
-                                                   repeats:YES
-                                                     block:^(NSTimer *timer) {
-        UIWindow *currentWindow = GetKeyWindow() ?: window;
-        if (currentWindow && currentWindow.rootViewController) {
-            checkRemoteStatus(currentWindow, nil);
-        }
-    }];
+    if (!gTimerTarget) {
+        gTimerTarget = [[HideMyTabAuthTimerTarget alloc] init];
+    }
+    
+    gCheckTimer = [NSTimer scheduledTimerWithTimeInterval:300.0
+                                                   target:gTimerTarget
+                                                 selector:@selector(timerFired:)
+                                                 userInfo:nil
+                                                  repeats:YES];
 }
 
 // ========== 免责声明弹窗 ==========
 static void showDisclaimerAlert(UIWindow *window, void (^onAgree)(void)) {
-    NSString *msg = @"⚠️ 该软件仅用于内部研究使用\n\n❌ 禁止向外流通\n❌ 禁止用于任何非法用途\n\n软件有问题联系乌梢蛇处理，其他问题一概不处理";
+    NSString *msg = @"⚠️ 该软件仅用于内部研究使用\n\n❌ 禁止向外流通\n❌ 禁止用于任何非法用途\n\n软件有问题联系乌梢蛇处理，其他一概不知";
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"免责声明"
                                                                   message:msg
@@ -221,7 +228,7 @@ static void showActivateAlert(UIWindow *window) {
     NSLog(@"[HideMyTabAuth] Today codes: %@", todayCodes);
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"激活验证"
-                                                                  message:@"请输入今日激活码"
+                                                                  message:@"请输入激活码"
                                                            preferredStyle:UIAlertControllerStyleAlert];
     
     [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
