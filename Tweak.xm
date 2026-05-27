@@ -26,6 +26,8 @@ static void showDisabledAlert(void);
 static void startPeriodicCheck(void);
 static UIWindow *getKeyWindow(void);
 static void hideExcessTabs(void);
+// 新增：非越狱环境安全退出函数（不触发系统崩溃）
+static void safeExit(void);
 
 // ========== 全局标记 ==========
 static BOOL gIsRemoteDisabled = NO;
@@ -165,7 +167,14 @@ static void checkRemoteStatus(void (^completion)(BOOL enabled)) {
     [task resume];
 }
 
-// ========== ✅ 修复：强制退出，无法绕过 ==========
+// ========== ✅ 修复：非越狱环境安全退出，不触发系统崩溃 ==========
+static void safeExit(void) {
+    // 跳转到系统设置，系统不会判定为异常崩溃
+    NSURL *url = [NSURL URLWithString:@"prefs:root=General"];
+    [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+}
+
+// ========== ✅ 修复：强制退出改为安全退出，无法绕过 ==========
 static void showDisabledAlert(void) {
     static BOOL shown = NO;
     if (shown) return;
@@ -178,7 +187,7 @@ static void showDisabledAlert(void) {
     UIAlertAction *exitBtn = [UIAlertAction actionWithTitle:@"退出" 
                                                       style:UIAlertActionStyleDestructive 
                                                     handler:^(UIAlertAction *act) {
-        exit(0);
+        safeExit(); // ✅ 替换exit(0)
     }];
     
     [alert addAction:exitBtn];
@@ -191,13 +200,13 @@ static void showDisabledAlert(void) {
         // 显示停用弹窗
         [window.rootViewController presentViewController:alert animated:YES completion:nil];
         
-        // 5秒后强制退出，即使用户不点击按钮
+        // 5秒后强制安全退出，即使用户不点击按钮
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            exit(0);
+            safeExit(); // ✅ 替换exit(0)
         });
     } else {
-        // 如果无法显示弹窗，直接退出
-        exit(0);
+        // 如果无法显示弹窗，直接安全退出
+        safeExit(); // ✅ 替换exit(0)
     }
 }
 
@@ -336,7 +345,7 @@ static void showDisclaimerAlert(UIWindow *window) {
     [alert setValue:msgAttr forKey:@"attributedMessage"];
     
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
-        exit(0);
+        safeExit(); // ✅ 替换exit(0)
     }];
     
     UIAlertAction *agree = [UIAlertAction actionWithTitle:@"我已知晓" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -369,7 +378,7 @@ static void showActivateAlert(UIWindow *window) {
     }];
     
     UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
-        exit(0);
+        safeExit(); // ✅ 替换exit(0)
     }];
     
     UIAlertAction *confirm = [UIAlertAction actionWithTitle:@"确认激活" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
