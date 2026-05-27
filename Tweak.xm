@@ -5,12 +5,14 @@ static NSArray * const REMOTE_URLS = @[
     @"https://gitee.com/huang-xuxuxuxu/hide-my-tab-control/raw/master/status.json"
 ];
 
-// ========== 全局状态变量 ==========
+// ========== 全局状态变量（必须在所有函数之前声明）==========
 static BOOL gRemoteChecking = NO;
 static NSTimer *gCheckTimer = nil;
 
-// ========== 前向声明 ==========
+// ========== 前向声明（避免顺序编译问题）==========
 static void checkRemoteStatus(UIWindow *window, void (^onContinue)(void));
+static void startAuthFlow(UIWindow *window);
+static void startPeriodicCheck(UIWindow *window);
 
 // ========== 日期单双数激活码 ==========
 static NSArray* getTodayActivateCodes() {
@@ -102,7 +104,7 @@ static void showToast(NSString *message, UIColor *color) {
     }];
 }
 
-// ========== 定时器目标类 ==========
+// ========== 定时器目标类（提前声明，但实现放在 checkRemoteStatus 之后）==========
 @interface HideMyTabAuthTimerTarget : NSObject
 @end
 
@@ -116,32 +118,6 @@ static void showToast(NSString *message, UIColor *color) {
 @end
 
 static HideMyTabAuthTimerTarget *gTimerTarget = nil;
-
-// ========== 应用生命周期监听（替代 hook UIApplicationDelegate）==========
-@interface HideMyTabAuthObserver : NSObject
-@end
-
-@implementation HideMyTabAuthObserver
-- (void)appDidBecomeActive:(NSNotification *)note {
-    static BOOL firstLaunch = YES;
-    if (firstLaunch) {
-        firstLaunch = NO;
-        return;
-    }
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *window = GetKeyWindow();
-        if (window && window.rootViewController) {
-            checkRemoteStatus(window, ^{
-                startAuthFlow(window);
-                startPeriodicCheck(window);
-            });
-        }
-    });
-}
-@end
-
-static HideMyTabAuthObserver *gAuthObserver = nil;
 
 // ========== 远程停用相关函数 ==========
 static void forceDisableApp(UIWindow *window) {
@@ -312,6 +288,33 @@ static void startAuthFlow(UIWindow *window) {
         }
     });
 }
+
+// ========== 应用生命周期监听（安全替代 hook UIApplicationDelegate）==========
+// 必须放在 startAuthFlow / startPeriodicCheck / checkRemoteStatus 定义之后
+@interface HideMyTabAuthObserver : NSObject
+@end
+
+@implementation HideMyTabAuthObserver
+- (void)appDidBecomeActive:(NSNotification *)note {
+    static BOOL firstLaunch = YES;
+    if (firstLaunch) {
+        firstLaunch = NO;
+        return;
+    }
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIWindow *window = GetKeyWindow();
+        if (window && window.rootViewController) {
+            checkRemoteStatus(window, ^{
+                startAuthFlow(window);
+                startPeriodicCheck(window);
+            });
+        }
+    });
+}
+@end
+
+static HideMyTabAuthObserver *gAuthObserver = nil;
 
 // ========== Hook UIWindow ==========
 %hook UIWindow
