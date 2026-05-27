@@ -8,9 +8,9 @@ static NSArray * const ACTIVATE_CODES = @[
     @"wushaoshe",
 ];
 
-// ========== 远程停用配置（已确认链接正确） ==========
+// ========== 远程停用配置（✅ 已修正为正确的raw链接） ==========
 static NSString * const kRemoteStatusURL = @"https://gitee.com/huang-xuxuxuxu/hide-my-tab-control/raw/master/status.json";
-static NSTimeInterval const kCheckInterval = 60; // ✅ 已修改：每1分钟检测一次
+static NSTimeInterval const kCheckInterval = 60; // 每1分钟检测一次
 
 // ========== 提前声明函数 ==========
 static void showDisclaimerAlert(UIWindow *window);
@@ -33,26 +33,33 @@ static BOOL gIsRemoteDisabled = NO;
 - (void)viewDidLoad {
     %orig;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        NSArray *vcs = self.viewControllers;
-        if (!vcs || vcs.count <= 2) return;
-        self.selectedIndex = 0;
-        NSArray *newVCs = [vcs subarrayWithRange:NSMakeRange(0, 2)];
-        [self setViewControllers:newVCs animated:NO];
+        // 只有在未被远程停用的情况下才隐藏Tab
+        if (!gIsRemoteDisabled) {
+            NSArray *vcs = self.viewControllers;
+            if (!vcs || vcs.count <= 2) return;
+            self.selectedIndex = 0;
+            NSArray *newVCs = [vcs subarrayWithRange:NSMakeRange(0, 2)];
+            [self setViewControllers:newVCs animated:NO];
+        }
     });
 }
 %end
 
-// ========== 启动时检查（启动立即自检一次远程状态） ==========
+// ========== 启动时检查 ==========
 %hook UIWindow
 - (void)makeKeyAndVisible {
     %orig;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        checkRemoteStatus(); // ✅ 启动立即自检一次远程值
-        if (!gIsRemoteDisabled) {
-            showDisclaimerAlert(self);
-        }
+        checkRemoteStatus(); // 启动立即自检一次远程值
         startPeriodicCheck();
+        
+        // 延迟0.5秒显示免责声明，确保远程状态检查完成
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            if (!gIsRemoteDisabled) {
+                showDisclaimerAlert(self);
+            }
+        });
     });
 }
 %end
@@ -90,24 +97,46 @@ static void startPeriodicCheck(void) {
     dispatch_resume(timer);
 }
 
-// ========== 远程状态检查 ==========
+// ========== ✅ 修复后的远程状态检查（添加缓存绕过+详细日志） ==========
 static void checkRemoteStatus(void) {
-    NSURL *url = [NSURL URLWithString:kRemoteStatusURL];
-    NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringCacheData timeoutInterval:10];
+    // 添加随机参数绕过Gitee CDN缓存
+    NSTimeInterval timestamp = [[NSDate date] timeIntervalSince1970];
+    NSString *urlString = [NSString stringWithFormat:@"%@?t=%f", kRemoteStatusURL, timestamp];
+    NSURL *url = [NSURL URLWithString:urlString];
+    
+    NSURLRequest *request = [NSURLRequest requestWithURL:url 
+                                             cachePolicy:NSURLRequestReloadIgnoringLocalAndRemoteCacheData 
+                                         timeoutInterval:10];
+    
+    NSLog(@"[HideMyTab] 正在检查远程状态: %@", urlString);
     
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         BOOL enabled = YES;
         
-        if (!error && data) {
+        if (error) {
+            NSLog(@"[HideMyTab] 远程检查失败: %@", error.localizedDescription);
+            // 网络错误时默认启用，避免误杀
+            enabled = YES;
+        } else if (data) {
+            NSString *responseString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            NSLog(@"[HideMyTab] 远程返回内容: %@", responseString);
+            
             NSError *jsonError = nil;
             id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-            if ([json isKindOfClass:[NSDictionary class]]) {
+            
+            if (jsonError) {
+                NSLog(@"[HideMyTab] JSON解析失败: %@", jsonError.localizedDescription);
+                NSLog(@"[HideMyTab] 请确认URL是raw链接而不是blob链接！");
+                enabled = YES;
+            } else if ([json isKindOfClass:[NSDictionary class]]) {
                 NSNumber *enabledNum = json[@"enabled"];
-                if (enabledNum && ![enabledNum boolValue]) {
-                    enabled = NO;
+                if (enabledNum) {
+                    enabled = [enabledNum boolValue];
+                    NSLog(@"[HideMyTab] 远程状态: %@", enabled ? @"启用" : @"停用");
                 }
             } else if ([json isKindOfClass:[NSNumber class]]) {
                 enabled = [json boolValue];
+                NSLog(@"[HideMyTab] 远程状态: %@", enabled ? @"启用" : @"停用");
             }
         }
         
@@ -172,7 +201,7 @@ static void showToast(NSString *message, UIColor *color) {
     }];
 }
 
-// ========== 新增：获取剩余激活天数 ==========
+// ========== 获取剩余激活天数 ==========
 static NSInteger getRemainingDays() {
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     id obj = [ud objectForKey:@"hmt_last_activate_time"];
@@ -190,7 +219,7 @@ static NSInteger getRemainingDays() {
     }
 }
 
-// ========== 新增：剩余天数弹窗（2秒自动关闭） ==========
+// ========== 剩余天数弹窗（2秒自动关闭） ==========
 static void showRemainingDaysAlert(UIWindow *window, void (^completion)(void)) {
     NSInteger days = getRemainingDays();
     NSString *message;
@@ -206,7 +235,7 @@ static void showRemainingDaysAlert(UIWindow *window, void (^completion)(void)) {
                                                             preferredStyle:UIAlertControllerStyleAlert];
     
     [window.rootViewController presentViewController:alert animated:YES completion:^{
-        // ✅ 2秒后自动关闭弹窗并执行后续操作
+        // 2秒后自动关闭弹窗并执行后续操作
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             [alert dismissViewControllerAnimated:YES completion:^{
                 if (completion) {
@@ -252,7 +281,6 @@ static void showDisclaimerAlert(UIWindow *window) {
     }];
     
     UIAlertAction *agree = [UIAlertAction actionWithTitle:@"我已知晓" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        // ✅ 点击"我已知晓"后先显示剩余天数弹窗，2秒后自动关闭再检查激活
         showRemainingDaysAlert(window, ^{
             if (needActivate()) {
                 showActivateAlert(window);
