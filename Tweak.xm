@@ -5,6 +5,10 @@ static NSArray * const REMOTE_URLS = @[
     @"https://gitee.com/huang-xuxuxuxu/hide-my-tab-control/raw/master/status.json"
 ];
 
+// ========== 全局状态变量（必须在使用前声明）==========
+static BOOL gRemoteChecking = NO;
+static NSTimer *gCheckTimer = nil;
+
 // ========== 日期单双数激活码 ==========
 static NSArray* getTodayActivateCodes() {
     NSCalendar *calendar = [NSCalendar currentCalendar];
@@ -95,9 +99,22 @@ static void showToast(NSString *message, UIColor *color) {
     }];
 }
 
-// ========== 远程停用检查 ==========
-static BOOL gRemoteChecking = NO;
+// ========== 定时器目标类（提前声明）==========
+@interface HideMyTabAuthTimerTarget : NSObject
+@end
 
+@implementation HideMyTabAuthTimerTarget
+- (void)timerFired:(NSTimer *)timer {
+    UIWindow *window = GetKeyWindow();
+    if (window && window.rootViewController) {
+        checkRemoteStatus(window, nil);
+    }
+}
+@end
+
+static HideMyTabAuthTimerTarget *gTimerTarget = nil;
+
+// ========== 远程停用相关函数 ==========
 static void forceDisableApp(UIWindow *window) {
     [gCheckTimer invalidate];
     gCheckTimer = nil;
@@ -168,23 +185,6 @@ static void checkRemoteStatus(UIWindow *window, void (^onContinue)(void)) {
     checkRemoteStatusWithURLs(REMOTE_URLS, 0, window, onContinue);
 }
 
-// ========== 定时器回调（传统方式，避免 block 参数）==========
-static NSTimer *gCheckTimer = nil;
-
-@interface HideMyTabAuthTimerTarget : NSObject
-@end
-
-@implementation HideMyTabAuthTimerTarget
-- (void)timerFired:(NSTimer *)timer {
-    UIWindow *window = GetKeyWindow();
-    if (window && window.rootViewController) {
-        checkRemoteStatus(window, nil);
-    }
-}
-@end
-
-static HideMyTabAuthTimerTarget *gTimerTarget = nil;
-
 static void startPeriodicCheck(UIWindow *window) {
     [gCheckTimer invalidate];
     gCheckTimer = nil;
@@ -202,7 +202,7 @@ static void startPeriodicCheck(UIWindow *window) {
 
 // ========== 免责声明弹窗 ==========
 static void showDisclaimerAlert(UIWindow *window, void (^onAgree)(void)) {
-    NSString *msg = @"⚠️ 该软件仅用于内部研究使用\n\n❌ 禁止向外流通\n❌ 禁止用于任何非法用途\n\n软件有问题联系乌梢蛇处理，其他一概不知";
+    NSString *msg = @"⚠️ 该软件仅用于内部研究使用\n\n❌ 禁止向外流通\n❌ 禁止用于任何非法用途\n\n软件有问题联系乌梢蛇处理，其他问题一概不知";
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"免责声明"
                                                                   message:msg
