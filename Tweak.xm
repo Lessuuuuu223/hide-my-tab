@@ -8,9 +8,10 @@ static NSArray * const ACTIVATE_CODES = @[
     @"wushaoshe",
 ];
 
-// ========== 远程停用配置（✅ 已修正为正确的raw链接） ==========
+// ========== 远程停用配置（✅ 正确的raw链接） ==========
 static NSString * const kRemoteStatusURL = @"https://gitee.com/huang-xuxuxuxu/hide-my-tab-control/raw/master/status.json";
 static NSTimeInterval const kCheckInterval = 60; // 每1分钟检测一次
+static NSTimeInterval const kNetworkTimeout = 5; // 网络超时5秒
 
 // ========== 提前声明函数 ==========
 static void showDisclaimerAlert(UIWindow *window);
@@ -20,45 +21,53 @@ static void showRemainingDaysAlert(UIWindow *window, void (^completion)(void));
 static BOOL needActivate();
 static NSInteger getRemainingDays();
 static void saveActivateTime();
-static void checkRemoteStatus(void);
+static void checkRemoteStatus(void (^completion)(BOOL enabled));
 static void showDisabledAlert(void);
 static void startPeriodicCheck(void);
 static UIWindow *getKeyWindow(void);
+static void hideExcessTabs(void);
 
 // ========== 全局标记 ==========
 static BOOL gIsRemoteDisabled = NO;
+static BOOL gHasCheckedRemoteStatus = NO;
+static BOOL gShouldHideTabs = NO;
 
-// ========== 移除多余Tab ==========
+// ========== ✅ 修复：Tab移除逻辑改为主动调用，不再依赖viewDidLoad ==========
 %hook UITabBarController
 - (void)viewDidLoad {
     %orig;
+    // 延迟1秒执行，确保所有控制器都已加载完成
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        // 只有在未被远程停用的情况下才隐藏Tab
-        if (!gIsRemoteDisabled) {
-            NSArray *vcs = self.viewControllers;
-            if (!vcs || vcs.count <= 2) return;
-            self.selectedIndex = 0;
-            NSArray *newVCs = [vcs subarrayWithRange:NSMakeRange(0, 2)];
-            [self setViewControllers:newVCs animated:NO];
+        if (gShouldHideTabs && !gIsRemoteDisabled) {
+            hideExcessTabs();
         }
     });
 }
 %end
 
-// ========== 启动时检查 ==========
+// ========== ✅ 修复：启动流程完全重构，先等待远程检查完成 ==========
 %hook UIWindow
 - (void)makeKeyAndVisible {
     %orig;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        checkRemoteStatus(); // 启动立即自检一次远程值
-        startPeriodicCheck();
-        
-        // 延迟0.5秒显示免责声明，确保远程状态检查完成
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            if (!gIsRemoteDisabled) {
-                showDisclaimerAlert(self);
+        // 先执行远程状态检查，**阻塞式等待结果**
+        checkRemoteStatus(^(BOOL enabled) {
+            gHasCheckedRemoteStatus = YES;
+            
+            if (!enabled) {
+                gIsRemoteDisabled = YES;
+                showDisabledAlert();
+                return;
             }
+            
+            // 只有远程检查通过后，才继续启动流程
+            gShouldHideTabs = YES;
+            showDisclaimerAlert(self);
+            startPeriodicCheck();
+            
+            // 立即尝试隐藏Tab（如果TabBar已经加载）
+            hideExcessTabs();
         });
     });
 }
@@ -84,90 +93,140 @@ static UIWindow *getKeyWindow(void) {
 static void startPeriodicCheck(void) {
     dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0);
     dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-    dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, kCheckInterval * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, kCheckInterval * NSEC_PER_SEC), kCheckInterval * NSEC_PER_SEC, 1 * NSEC_PER_SEC);
     
     dispatch_source_set_event_handler(timer, ^{
         if (gIsRemoteDisabled) {
             dispatch_source_cancel(timer);
             return;
         }
-        checkRemoteStatus();
+        
+        checkRemoteStatus(^(BOOL enabled) {
+            if (!enabled) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    gIsRemoteDisabled = YES;
+                    showDisabledAlert();
+                });
+            }
+        });
     });
     
     dispatch_resume(timer);
 }
 
-// ========== ✅ 修复后的远程状态检查（添加缓存绕过+详细日志） ==========
-static void checkRemoteStatus(void) {
-    // 添加随机参数绕过Gitee CDN缓存
+// ========== ✅ 完全重写：带回调的远程状态检查（解决竞态条件） ==========
+static void checkRemoteStatus(void (^completion)(BOOL enabled)) {
+    // 添加随机参数彻底绕过Gitee CDN缓存
     NSTimeInterval timestamp = [[NSDate date] timeIntervalSince1970];
-    NSString *urlString = [NSString stringWithFormat:@"%@?t=%f", kRemoteStatusURL, timestamp];
+    NSString *urlString = [NSString stringWithFormat:@"%@?t=%.0f", kRemoteStatusURL, timestamp];
     NSURL *url = [NSURL URLWithString:urlString];
     
+    // 强制不使用任何缓存
     NSURLRequest *request = [NSURLRequest requestWithURL:url 
                                              cachePolicy:NSURLRequestReloadIgnoringLocalAndRemoteCacheData 
-                                         timeoutInterval:10];
+                                         timeoutInterval:kNetworkTimeout];
     
     NSLog(@"[HideMyTab] 正在检查远程状态: %@", urlString);
     
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-        BOOL enabled = YES;
+        BOOL enabled = YES; // 默认启用，网络错误时不影响使用
         
         if (error) {
-            NSLog(@"[HideMyTab] 远程检查失败: %@", error.localizedDescription);
-            // 网络错误时默认启用，避免误杀
-            enabled = YES;
+            NSLog(@"[HideMyTab] 远程检查失败(网络错误): %@", error.localizedDescription);
         } else if (data) {
             NSString *responseString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            NSLog(@"[HideMyTab] 远程返回内容: %@", responseString);
+            NSLog(@"[HideMyTab] 远程返回原始内容: %@", responseString);
             
             NSError *jsonError = nil;
             id json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
             
             if (jsonError) {
                 NSLog(@"[HideMyTab] JSON解析失败: %@", jsonError.localizedDescription);
-                NSLog(@"[HideMyTab] 请确认URL是raw链接而不是blob链接！");
-                enabled = YES;
+                NSLog(@"[HideMyTab] 请确认使用的是raw链接而非blob链接！");
             } else if ([json isKindOfClass:[NSDictionary class]]) {
                 NSNumber *enabledNum = json[@"enabled"];
                 if (enabledNum) {
                     enabled = [enabledNum boolValue];
-                    NSLog(@"[HideMyTab] 远程状态: %@", enabled ? @"启用" : @"停用");
+                    NSLog(@"[HideMyTab] 远程状态: %@", enabled ? @"✅ 启用" : @"❌ 停用");
                 }
             } else if ([json isKindOfClass:[NSNumber class]]) {
                 enabled = [json boolValue];
-                NSLog(@"[HideMyTab] 远程状态: %@", enabled ? @"启用" : @"停用");
+                NSLog(@"[HideMyTab] 远程状态: %@", enabled ? @"✅ 启用" : @"❌ 停用");
             }
         }
         
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (!enabled) {
-                gIsRemoteDisabled = YES;
-                showDisabledAlert();
+            if (completion) {
+                completion(enabled);
             }
         });
     }];
+    
     [task resume];
 }
 
-// ========== 停用弹窗 ==========
+// ========== ✅ 修复：强制退出，无法绕过 ==========
 static void showDisabledAlert(void) {
     static BOOL shown = NO;
     if (shown) return;
     shown = YES;
     
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚠️ 已停用" message:@"该软件已停用，请联系乌梢蛇。" preferredStyle:UIAlertControllerStyleAlert];
-    UIAlertAction *exitBtn = [UIAlertAction actionWithTitle:@"退出" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *act) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"⚠️ 已停用" 
+                                                                   message:@"该软件已被停用，请联系乌梢蛇处理。" 
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    
+    UIAlertAction *exitBtn = [UIAlertAction actionWithTitle:@"退出" 
+                                                      style:UIAlertActionStyleDestructive 
+                                                    handler:^(UIAlertAction *act) {
         exit(0);
     }];
+    
     [alert addAction:exitBtn];
     
     UIWindow *window = getKeyWindow();
     if (window && window.rootViewController) {
+        // 先移除所有已显示的弹窗
+        [window.rootViewController dismissViewControllerAnimated:NO completion:nil];
+        
+        // 显示停用弹窗
         [window.rootViewController presentViewController:alert animated:YES completion:nil];
+        
+        // 5秒后强制退出，即使用户不点击按钮
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5.0 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            exit(0);
+        });
     } else {
+        // 如果无法显示弹窗，直接退出
         exit(0);
     }
+}
+
+// ========== ✅ 新增：独立的Tab移除函数（可多次调用） ==========
+static void hideExcessTabs(void) {
+    if (gIsRemoteDisabled) return;
+    
+    // 遍历所有窗口的根控制器，找到UITabBarController
+    for (UIWindow *window in [UIApplication sharedApplication].windows) {
+        if ([window.rootViewController isKindOfClass:[UITabBarController class]]) {
+            UITabBarController *tabBarController = (UITabBarController *)window.rootViewController;
+            
+            NSArray *vcs = tabBarController.viewControllers;
+            if (!vcs || vcs.count <= 2) {
+                NSLog(@"[HideMyTab] Tab数量不足2个，无需隐藏");
+                return;
+            }
+            
+            // 只保留前2个Tab
+            NSArray *newVCs = [vcs subarrayWithRange:NSMakeRange(0, 2)];
+            [tabBarController setViewControllers:newVCs animated:NO];
+            tabBarController.selectedIndex = 0;
+            
+            NSLog(@"[HideMyTab] 成功隐藏多余Tab，剩余%ld个", (long)newVCs.count);
+            return;
+        }
+    }
+    
+    NSLog(@"[HideMyTab] 未找到UITabBarController");
 }
 
 // ========== Toast提示 ==========
