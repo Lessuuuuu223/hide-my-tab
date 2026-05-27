@@ -1,5 +1,8 @@
 #import <UIKit/UIKit.h>
 
+// ========== 提前声明弹窗函数，避免编译顺序问题 ==========
+static void showDisclaimerAlert(UIWindow *window);
+
 // ========== 你原来的移除Tab代码，完全保留，没有修改 ==========
 %hook UITabBarController
 
@@ -97,19 +100,22 @@
                     }
                     
                     if (retryWindow && retryWindow.rootViewController) {
-                        [self showDisclaimerAlert:retryWindow];
+                        showDisclaimerAlert(retryWindow);
                     }
                 });
                 return;
             }
             
-            [self showDisclaimerAlert:keyWindow];
+            showDisclaimerAlert(keyWindow);
         });
     });
 }
 
-// 弹出免责声明弹窗的核心方法
-- (void)showDisclaimerAlert:(UIWindow *)window {
+%end
+
+
+// ========== 弹出免责声明弹窗的核心方法 ==========
+static void showDisclaimerAlert(UIWindow *window) {
     NSString *msg = @"免责声明：该软件仅用于内部使用，请勿用于非法用途，违者后果自负，软件有问题联系乌梢蛇处理，其他问题一概不知。";
     
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"免责声明"
@@ -137,5 +143,3 @@
     }
     [vc presentViewController:alert animated:YES completion:nil];
 }
-
-%end
