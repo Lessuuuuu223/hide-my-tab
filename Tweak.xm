@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <CommonCrypto/CommonDigest.h>
 
 // ========== 远程停用开关配置 ==========
 static NSArray * const REMOTE_URLS = @[
@@ -104,7 +105,7 @@ static void showToast(NSString *message, UIColor *color) {
     }];
 }
 
-// ========== 定时器目标类（提前声明，但实现放在 checkRemoteStatus 之后）==========
+// ========== 定时器目标类 ==========
 @interface HideMyTabAuthTimerTarget : NSObject
 @end
 
@@ -290,7 +291,6 @@ static void startAuthFlow(UIWindow *window) {
 }
 
 // ========== 应用生命周期监听（安全替代 hook UIApplicationDelegate）==========
-// 必须放在 startAuthFlow / startPeriodicCheck / checkRemoteStatus 定义之后
 @interface HideMyTabAuthObserver : NSObject
 @end
 
@@ -315,6 +315,35 @@ static void startAuthFlow(UIWindow *window) {
 @end
 
 static HideMyTabAuthObserver *gAuthObserver = nil;
+
+// ========== 移除多余Tab的Hook ==========
+%hook UITabBarController
+
+- (void)viewDidLoad {
+    %orig;
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSArray *vcs = self.viewControllers;
+        if (!vcs || vcs.count <= 2) return;
+        
+        NSArray *newVCs = [vcs subarrayWithRange:NSMakeRange(0, 2)];
+        self.viewControllers = newVCs;
+        
+        UITabBar *tabBar = self.tabBar;
+        NSArray *items = tabBar.items;
+        if (items.count > 2) {
+            NSArray *newItems = [items subarrayWithRange:NSMakeRange(0, 2)];
+            [tabBar setItems:newItems animated:NO];
+        }
+    });
+}
+
+- (void)setSelectedIndex:(NSUInteger)index {
+    if (index >= 2) index = 0;
+    %orig(index);
+}
+
+%end
 
 // ========== Hook UIWindow ==========
 %hook UIWindow
